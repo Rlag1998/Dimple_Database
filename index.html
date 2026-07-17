@@ -348,12 +348,12 @@ const SIM = (() => {
     SPIN_DMG_BASE: 4, SPIN_DMG_POW: 100, SPIN_UNDER_MULT: 0.6, SPIN_MIT_CAP: 0.5,
     SPIN_RECOIL: 0.22, SPIN_KNOCK: 34, SPIN_KEEP: 0.15,
     // hammer
-    HAMMER_CD_T: 48, HAMMER_BASE: 6, HAMMER_POW: 60, HAMMER_PIERCE: 0.68,
+    HAMMER_CD_T: 48, HAMMER_BASE: 6, HAMMER_POW: 54, HAMMER_PIERCE: 0.75,
     HAMMER_STAGGER_P: 0.3, HAMMER_STAGGER_T: 16,
     // flipper
     FLIP_CD_T: 75, FLIP_P_BASE: 0.48, FLIP_P_POW: 0.9, FLIP_P_CTRL: 0.9,
     FLIP_P_MIN: 0.10, FLIP_P_MAX: 0.85,
-    FLIP_DMG_BASE: 4, FLIP_DMG_POW: 26, GYRO_DMG: 20, FLIP_IMPULSE: 26,
+    FLIP_DMG_BASE: 4, FLIP_DMG_POW: 26, GYRO_DMG: 15, FLIP_IMPULSE: 26,
     FLIP_IMMUNE_T: 60,               // post-self-right immunity > hammer cd
     OOA_POW_K: 0.5, OOA_CAP: 0.30,
     // rammer
@@ -371,7 +371,7 @@ const SIM = (() => {
     TYPE_SWITCH: 0.035,
     ALLOC_FLOOR: 0.005,
     WILDCARDS: 2,
-    MIN_TYPE: 3,                     // minority-type floor: every type keeps >=2 members
+    MIN_TYPE: 3,                     // minority-type floor: every type keeps this many members
     RETIRE_AFTER: 5,                 // champion retires after this many straight titles
     // offspring per knockout wins: champion(5), runner-up(4), SF(3), QF(2), R16(1)
     OFFSPRING: { 5: 3, 4: 3, 3: 2, 2: 2, 1: 1 },
@@ -583,24 +583,28 @@ const SIM = (() => {
       st.events.push({ tick: st.tick, t: st.tick * CFG.TICK, kind, who, mag: mag || 0 });
     }
 
-    function dealDamage(X, Y, amount, kind) {
-      if (amount <= 0 || !Y.alive) return 0;
+    function dealDamage(X, Y, amount, kind, yPreAlive) {
+      // a fighter that dies mid-exchange (e.g. the attacker self-KOs on recoil)
+      // still receives the simultaneous blow: gate on pre-exchange aliveness so
+      // damage credit never depends on slot order
+      if (amount <= 0 || (!Y.alive && !yPreAlive)) return 0;
+      const wasAlive = Y.alive;
       Y.hp -= amount;
       X.dmgDealt += amount;
       Y.lastHitTick = st.tick;
       pushEvent(kind, X === st.a ? 0 : 1, amount);
-      if (Y.hp <= 0) { Y.hp = 0; Y.alive = false; Y.cause = 'ko'; }
+      if (wasAlive && Y.hp <= 0) { Y.hp = 0; Y.alive = false; Y.cause = 'ko'; }
       return amount;
     }
 
     const nearestWallDist = F => Math.min(F.x, F.y, A - F.x, A - F.y);
 
-    function tryFlip(X, Y, ySpin) {
+    function tryFlip(X, Y, ySpin, yPreAlive) {
       X.flipT = CFG.FLIP_CD_T;
       X.lastFlipTick = st.tick;
       const p = clamp(CFG.FLIP_P_BASE + X.bot.alloc.power * CFG.FLIP_P_POW
         - Y.bot.alloc.control * CFG.FLIP_P_CTRL, CFG.FLIP_P_MIN, CFG.FLIP_P_MAX);
-      if (!rng.chance(p)) { dealDamage(X, Y, 1.5, 'nudge'); return; }
+      if (!rng.chance(p)) { dealDamage(X, Y, 1.5, 'nudge', yPreAlive); return; }
       let dmg = CFG.FLIP_DMG_BASE + X.bot.alloc.power * CFG.FLIP_DMG_POW;
       if (Y.bot.type === 'spinner' && ySpin > 0.15) {
         dmg += ySpin * CFG.GYRO_DMG;             // gyroscopic self-destruction
@@ -614,7 +618,7 @@ const SIM = (() => {
       Y.vx += (dx / dl) * imp;
       Y.vy += (dy / dl) * imp;
       pushEvent('flip', X === st.a ? 0 : 1, dmg);
-      dealDamage(X, Y, dmg, 'flipdmg');
+      dealDamage(X, Y, dmg, 'flipdmg', yPreAlive);
       if (Y.alive && nearestWallDist(Y) < CFG.WALL_OOA
         && rng.chance(clamp(X.bot.alloc.power * CFG.OOA_POW_K, 0, CFG.OOA_CAP))) {
         Y.alive = false; Y.cause = 'ooa';
@@ -628,7 +632,7 @@ const SIM = (() => {
       const xUnder = X.d.effClear < Y.d.effClear - CFG.UNDER_TH;
 
       if (type === 'flipper') {
-        if (xUnder && Xpre.flipT <= 0 && !Ypre.flipped && Ypre.flipImmuneT <= 0) tryFlip(X, Y, Ypre.spin);
+        if (xUnder && Xpre.flipT <= 0 && !Ypre.flipped && Ypre.flipImmuneT <= 0) tryFlip(X, Y, Ypre.spin, Ypre.alive);
       } else if (type === 'spinner') {
         if (Xpre.spin > CFG.SPIN_MIN && Xpre.spinCdT <= 0) {
           X.spinCdT = CFG.SPIN_HIT_CD_T;
@@ -639,7 +643,7 @@ const SIM = (() => {
             base *= CFG.SPIN_UNDER_MULT;
           }
           const mit = Math.min(Y.d.armorMit, CFG.SPIN_MIT_CAP);
-          const dealt = dealDamage(X, Y, base * (1 - mit), 'spin');
+          const dealt = dealDamage(X, Y, base * (1 - mit), 'spin', Ypre.alive);
           // recoil keys off damage actually delivered (armour bricks blunt the
           // disc, they don't reflect it)
           X.hp -= dealt * CFG.SPIN_RECOIL;
@@ -648,7 +652,7 @@ const SIM = (() => {
           Y.vx += nx * kick; Y.vy += ny * kick;
           X.vx -= nx * kick * 0.35; X.vy -= ny * kick * 0.35;
           Y.staggerT = Math.max(Y.staggerT, 8);
-          X.spin = Xpre.spin * CFG.SPIN_KEEP;
+          if (X.flippedFor < 0) X.spin = Xpre.spin * CFG.SPIN_KEEP; // a same-tick flip zeroed it — that wins
         }
       } else if (type === 'hammer') {
         if (Xpre.hammerT <= 0) {
@@ -656,7 +660,7 @@ const SIM = (() => {
           X.lastHammerTick = st.tick;
           const dmg = (CFG.HAMMER_BASE + X.bot.alloc.power * CFG.HAMMER_POW)
             * (1 - Y.d.armorMit * CFG.HAMMER_PIERCE);
-          dealDamage(X, Y, dmg, 'hammer');
+          dealDamage(X, Y, dmg, 'hammer', Ypre.alive);
           if (rng.chance(CFG.HAMMER_STAGGER_P)) Y.staggerT = Math.max(Y.staggerT, CFG.HAMMER_STAGGER_T);
         }
       } else if (type === 'rammer') {
@@ -671,7 +675,7 @@ const SIM = (() => {
           const grindDmg = CFG.RAM_GRIND_BASE + X.bot.alloc.power * CFG.RAM_GRIND_POW
             + X.bot.alloc.armor * CFG.RAM_GRIND_ARM;
           const dmg = Math.max(chargeDmg, grindDmg) * (1 - Y.d.armorMit * CFG.RAM_PEN);
-          dealDamage(X, Y, dmg, 'ram');
+          dealDamage(X, Y, dmg, 'ram', Ypre.alive);
           X.hp -= dmg * CFG.RAM_SELF;
           if (X.hp <= 0) { X.hp = 0; X.alive = false; X.cause = 'ko'; }
           const push = Math.max(closing, X.d.speed * Math.max(0, align)) * CFG.RAM_PUSH * Y.d.kbResist;
@@ -864,6 +868,9 @@ const SIM = (() => {
         const nx = ddx / dist, ny = ddy / dist;
         a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
         b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+        const RR = CFG.BOT_R;
+        a.x = clamp(a.x, RR, A - RR); a.y = clamp(a.y, RR, A - RR);
+        b.x = clamp(b.x, RR, A - RR); b.y = clamp(b.y, RR, A - RR);
         const rvn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
         const closing = Math.max(0, -rvn);
         // simultaneous exchange: both act on a pre-contact snapshot, so neither
@@ -871,7 +878,7 @@ const SIM = (() => {
         const snap = F => ({
           spin: F.spin, spinCdT: F.spinCdT, hammerT: F.hammerT, flipT: F.flipT,
           ramT: F.ramT, flipped: F.flippedFor >= 0, flipImmuneT: F.flipImmuneT,
-          can: F.alive && F.flippedFor < 0,
+          alive: F.alive, can: F.alive && F.flippedFor < 0,
         });
         const aPre = snap(a), bPre = snap(b);
         if (aPre.can) resolveHit(a, b, nx, ny, closing, aPre, bPre);
@@ -1053,7 +1060,7 @@ const SIM = (() => {
     const countByType = t => newPop.filter(bt => bt.type === t).length;
     for (let i = 0; i < EVO.WILDCARDS && newPop.length < CFG.POP; i++) {
       const rarest = TYPES.slice().sort((t1, t2) => countByType(t1) - countByType(t2))[0];
-      const g = archetypeGenome(rarest, rng, 0.08);
+      const g = refGenome(rarest, state, rng, 0.08); // era-tested build when one is remembered
       newPop.push(makeBot({
         base: makeBaseName(rng, state.usedNames), type: g.type, alloc: g.alloc,
         clearance: g.clearance, aggression: g.aggression,
@@ -1124,11 +1131,12 @@ const SIM = (() => {
     }
     const prevRec = state.history.length ? state.history[state.history.length - 1] : null;
     if (prevRec) {
-      const tally = tour.matchupTally();
+      const tally = prevRec.matchups; // the PREVIOUS tournament bred this population
       for (const t of TYPES) {
         const now = stats.share[t], was = prevRec.share[t];
-        if (was > 0 && now === 0) bits.push('The ' + TYPE_INFO[t].plural + ' have gone <b>extinct</b>.');
-        else if (was === 0 && now > 0) bits.push('A ' + TYPE_INFO[t].label.toLowerCase() + ' <b>reappears</b> in the gene pool.');
+        const floorShare = EVO.MIN_TYPE / CFG.POP;
+        if (was > floorShare && now <= floorShare) bits.push('The ' + TYPE_INFO[t].plural + ' are <b>clinging to survival</b> at the minority floor.');
+        else if (was <= floorShare && now >= floorShare * 2 + 0.001) bits.push(capFirst(TYPE_INFO[t].plural) + ' <b>re-invade</b> off the floor.');
         else if (now >= 0.5 && was < 0.5) bits.push(capFirst(TYPE_INFO[t].plural) + ' now hold <b>over half</b> the field.');
         else if (now - was >= 0.12) {
           // explain the surge with the matchup it feasted on
@@ -1265,7 +1273,7 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
   // ---------- ui state ----------
   const ui = {
     sim: null, tour: null, flat: [], revealed: 0, highlights: new Set(),
-    phase: 'boot', phaseT: 0, battle: null, curFlat: -1, acc: 0,
+    phase: 'boot', phaseT: 0, battle: null, curFlat: -1, acc: 0, tourDone: false,
     lastDmgTick: 0, suppressFX: false,
     paused: false, auto: true, speed: 2, mode: 'highlights',
     particles: [], floaters: [], shake: 0, pitFlash: 0,
@@ -1308,6 +1316,7 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
   function startGeneration() {
     const st = ui.sim;
     ui.tour = SIM.createTournament(st.pop, st.seed, st.gen);
+    ui.tourDone = false;
     ui.tour.runHeadless();          // outcomes are fixed up-front; replays are identical
     ui.flat = [];
     for (let r = 0; r < ui.tour.rounds.length; r++) {
@@ -1380,10 +1389,12 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
 
   function applyGenerationEnd() {
     ui.lastRecord = SIM.finishGeneration(ui.sim, ui.tour);
-    ui.tour = null; ui.battle = null;
+    ui.tourDone = true;             // tour stays visible in the bracket, but is spent
+    ui.battle = null;
     updateAfterGeneration();
     showSummary(ui.lastRecord);
     setPhase('summary');
+    renderBracket();                // drop the pulsing live highlight
   }
 
   function updateAfterGeneration() {
@@ -1415,7 +1426,7 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
   function runInstantGens(n) {
     hideSummary(); banner(null);
     // finish the tournament in progress first so the timeline stays coherent
-    if (ui.tour) { ui.lastRecord = SIM.finishGeneration(ui.sim, ui.tour); ui.tour = null; ui.battle = null; n--; }
+    if (ui.tour && !ui.tourDone) { ui.lastRecord = SIM.finishGeneration(ui.sim, ui.tour); ui.tourDone = true; ui.battle = null; n--; }
     ui.instantRun = { left: n };
     setPhase('instant');
   }
@@ -1472,7 +1483,7 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
           feed(ts + ' ' + nameSpan(att.bot) + ' gets under ' + nameSpan(vic.bot) + ' — <b>IT’S FLIPPED!</b>', true);
           break;
         case 'gyro':
-          feed(ts + ' ' + nameSpan(vic.bot) + '’s disc bites the floor — gyro carnage!', true);
+          feed(ts + ' ' + nameSpan(att.bot) + '’s disc bites the floor — gyro carnage!', true);
           break;
         case 'selfright':
           feed(ts + ' ' + nameSpan(att.bot) + ' self-rights — back in the fight!');
@@ -1813,7 +1824,13 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
     $('bracket').innerHTML = frag.join('');
     $('bracketRound').textContent = liveRound || ('gen ' + ui.sim.gen);
     const live = $('bracket').querySelector('.brkt-match.live');
-    if (live) live.scrollIntoView({ block: 'nearest' });
+    if (live) {
+      const br = $('bracket');
+      const top = live.offsetTop - br.offsetTop;
+      if (top < br.scrollTop || top + live.offsetHeight > br.scrollTop + br.clientHeight) {
+        br.scrollTop = top - br.clientHeight / 2;
+      }
+    }
   }
   const FLAT_OFFSET = [0, 16, 24, 28, 30];
   function pairKnown(r, i) {
@@ -1857,6 +1874,16 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
       const y = fr.y0 + fr.h * (1 - v);
       g.strokeStyle = GRID; g.beginPath(); g.moveTo(fr.x0, y); g.lineTo(fr.x0 + fr.w, y); g.stroke();
       g.fillText(Math.round(v * 100) + '%', fr.x0 - 6, y + 4);
+    }
+    if (n === 1) {
+      let lvl = 0;
+      for (const t of STACK_ORDER) {
+        const hh = hist[0].share[t];
+        g.fillStyle = TYPE_COLOR[t];
+        g.fillRect(fr.x0, fr.y0 + fr.h * (1 - lvl - hh), fr.w, Math.max(0, fr.h * hh - 1));
+        lvl += hh;
+      }
+      return;
     }
     // stacked bands, 2px surface gap between fills
     let below = new Array(n).fill(0);
@@ -1927,10 +1954,15 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
     for (const s of TRAIT_SERIES) {
       g.strokeStyle = s.color; g.lineWidth = 2;
       g.beginPath();
-      for (let i = 0; i < n; i++) {
-        const x = xAt(fr, i, n);
-        const y = fr.y0 + fr.h * (1 - hist[i].avg[s.key] / maxV);
-        i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+      if (n === 1) {
+        const x = xAt(fr, 0, 1), y = fr.y0 + fr.h * (1 - hist[0].avg[s.key] / maxV);
+        g.moveTo(x - 18, y); g.lineTo(x + 18, y);
+      } else {
+        for (let i = 0; i < n; i++) {
+          const x = xAt(fr, i, n);
+          const y = fr.y0 + fr.h * (1 - hist[i].avg[s.key] / maxV);
+          i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+        }
       }
       g.stroke();
       endYs.push({ s, y: fr.y0 + fr.h * (1 - hist[n - 1].avg[s.key] / maxV) });
@@ -2095,7 +2127,9 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
   attachTip('champStrip', 'stripTip', relX => {
     const log = ui.sim ? ui.sim.champLog : [];
     if (!log.length) return null;
-    const i = clamp(Math.floor(relX * log.length), 0, log.length - 1);
+    const cw = $('champStrip').width;
+    const f = clamp((relX - 8 / cw) / (1 - 16 / cw), 0, 1);
+    const i = clamp(Math.floor(f * log.length), 0, log.length - 1);
     const e = log[i];
     return '<div class="th">GENERATION ' + e.gen + '</div>' +
       '<div class="tr"><span class="nm"><span class="sw" style="background:' + TYPE_COLOR[e.type] + '"></span>' +
@@ -2204,7 +2238,7 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
   });
   $('btnSkipGen').addEventListener('click', () => {
     if (ui.instantRun) return;
-    if (!ui.tour) return;
+    if (!ui.tour || ui.tourDone) return;
     banner(null);
     ui.revealed = ui.flat.length;
     renderBracket();
@@ -2236,7 +2270,7 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
 
   function bootSim(seed) {
     ui.sim = SIM.createSim(seed);
-    ui.tour = null; ui.battle = null; ui.lastRecord = null; ui.instantRun = null;
+    ui.tour = null; ui.tourDone = false; ui.battle = null; ui.lastRecord = null; ui.instantRun = null;
     $('seedInp').value = String(seed);
     $('headline').innerHTML = 'A fresh scrapyard of 32 robots rolls into the arena — 8 of each weapon type. Seed <b>' + seed + '</b>. Let natural selection decide who builds the future.';
     $('champName').textContent = '—';
@@ -2250,6 +2284,11 @@ if (typeof globalThis !== 'undefined') globalThis.SIM = SIM;
 
   $('typeLegend').innerHTML = legendHtml(STACK_ORDER.map(t => [SIM.TYPE_INFO[t].label, TYPE_COLOR[t]]));
   $('traitLegend').innerHTML = legendHtml(TRAIT_SERIES.map(s => [s.label, s.color]));
+
+  // browsers can restore form state across reloads — read the real widget values
+  ui.speed = parseInt($('speedSel').value, 10) || 2;
+  ui.mode = $('modeSel').value || 'highlights';
+  ui.auto = $('autoChk').checked;
 
   window.__RWE = ui;   // debug/testing hook (read-only by convention)
   bootSim((Math.random() * 0xFFFFFFFF) >>> 0);
