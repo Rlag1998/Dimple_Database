@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dynasty · Population Genetics Observatory</title>
+  <meta name="description" content="An interactive observatory for a simulated fantasy population — generational drift, Mendelian inheritance, and an allele-tracing family tree." />
+  <link rel="preconnect" href="" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%A7%AC%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">🧬</span>
+      <div>
+        <span class="brand-name">Dynasty</span>
+        <span class="brand-sub">Population Genetics Observatory</span>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button class="tab on" data-view="observatory" role="tab" aria-selected="true">Observatory</button>
+      <button class="tab" data-view="traits" role="tab" aria-selected="false">Traits</button>
+      <button class="tab" data-view="genetics" role="tab" aria-selected="false">Genetics</button>
+      <button class="tab" data-view="lineage" role="tab" aria-selected="false">Lineage</button>
+    </nav>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+  </header>
+
+  <main id="view" class="view" aria-live="polite">
+    <div class="loader">Loading the observatory…</div>
+  </main>
+
+  <footer class="app-footer">
+    <span id="footer-meta" class="muted"></span>
+    <span class="muted">Built for GitHub Pages · <a href="https://github.com/rlag1998/dimple_database" rel="noopener">source &amp; data pipeline</a></span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
