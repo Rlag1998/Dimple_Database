@@ -32,6 +32,8 @@ jobs:
             echo "No population.json committed — deploying pre-built data/ as-is."
           fi
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Package site
         run: |
           mkdir -p _site
