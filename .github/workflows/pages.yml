@@ -1,10 +1,11 @@
 name: Deploy Dynasty to GitHub Pages
 
 # Rebuilds the compact data artifacts from population.json and deploys the site.
-# The configure-pages step self-enables Pages (source = GitHub Actions) on first run.
+# Requires Pages "Source: GitHub Actions" (Settings -> Pages) enabled once by an
+# admin — GitHub's built-in token cannot bootstrap Pages on the first run.
 on:
   push:
-    branches: [main, claude/population-data-viz-m5xru6]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
